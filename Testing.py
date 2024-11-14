@@ -1,47 +1,44 @@
+from Obstacles_Generator import Generate_Map,VisualizeMap
 import numpy as np
+import pandas as pd
+import csv
+# map_data = Generate_Map()
+# Load the map from the CSV file
 
-# Initialize a 600x600 map with obstacle and path indicators
-rows, cols = 600, 600
-map_data = np.random.choice([0, 1], (rows, cols), p=[0.6, 0.4])  # 80% paths, 20% obstacles
+with open('map.csv', 'r') as file:
+    reader = csv.reader(file)
+    map_data = [[int(cell) for cell in row] for row in reader]
 
-# Initialize a 3D array to store each pixel's data: [obstacle, dist_up, dist_down, dist_right, dist_left]
-map_with_info = np.zeros((rows, cols, 5), dtype=int)
-map_with_info[:, :, 0] = map_data  # Set obstacle data from map_data
+# Convert map data to a numpy array for easier manipulation and visualization
+map_grid =np.array(map_data)
 
-# Fill distances with a large number initially
-max_distance = rows * cols  # Maximum possible distance
-map_with_info[:, :, 1:] = max_distance
+grid_size = 600
 
-# First pass: Top-left to Bottom-right
-for i in range(rows):
-    for j in range(cols):
-        if map_data[i, j] == 1:  # Obstacle
-            map_with_info[i, j, 1:] = 0  # No distance to itself
-        else:
-            # Check above
-            if i > 0:
-                map_with_info[i, j, 1] = map_with_info[i - 1, j, 1] + 1
-            # Check left
-            if j > 0:
-                map_with_info[i, j, 4] = map_with_info[i, j - 1, 4] + 1
+data = []
 
-# Second pass: Bottom-right to Top-left
-for i in range(rows - 1, -1, -1):
-    for j in range(cols - 1, -1, -1):
-        if map_data[i, j] == 0:  # Only calculate for free path
-            # Check below
-            if i < rows - 1:
-                map_with_info[i, j, 2] = min(map_with_info[i, j, 2], map_with_info[i + 1, j, 2] + 1)
-            # Check right
-            if j < cols - 1:
-                map_with_info[i, j, 3] = min(map_with_info[i, j, 3], map_with_info[i, j + 1, 3] + 1)
+# Helper function to calculate distance to nearest obstacle in a given direction
+def find_distance_to_obstacle(x, y, dx, dy):
+    distance = 0
+    while 0 <= x < grid_size and 0 <= y < grid_size:
+        x += dx
+        y += dy
+        distance += 1
+        if not (0 <= x < grid_size and 0 <= y < grid_size) or map_grid[x, y] == 1:
+            break
+    return distance if 0 <= x < grid_size and 0 <= y < grid_size else grid_size  # Max if no obstacle found
 
-# map_with_info now contains the data in the form [obstacle, dist_up, dist_down, dist_right, dist_left] for each pixel
-print("Map with additional information is ready.")
+# Populate data with distances and obstacle status
+for x in range(grid_size):
+    for y in range(grid_size):
+        obstacle_status = map_grid[x, y]
+        dist_above = find_distance_to_obstacle(x, y, -1, 0)  # Up
+        dist_below = find_distance_to_obstacle(x, y, 1, 0)   # Down
+        dist_left = find_distance_to_obstacle(x, y, 0, -1)   # Left
+        dist_right = find_distance_to_obstacle(x, y, 0, 1)   # Right
+        data.append([obstacle_status, dist_above, dist_below, dist_left, dist_right])
 
+# Convert data to a DataFrame and save as CSV
+df = pd.DataFrame(data)
+df.to_csv('map_data.csv', index=False, header=False)
 
-np.savetxt('obstacles.csv', map_with_info[:, :, 0], delimiter=',', fmt='%d')    # Obstacle layer
-np.savetxt('dist_up.csv', map_with_info[:, :, 1], delimiter=',', fmt='%d')      # Distance up layer
-np.savetxt('dist_down.csv', map_with_info[:, :, 2], delimiter=',', fmt='%d')    # Distance down layer
-np.savetxt('dist_right.csv', map_with_info[:, :, 3], delimiter=',', fmt='%d')   # Distance right layer
-np.savetxt('dist_left.csv', map_with_info[:, :, 4], delimiter=',', fmt='%d')    # Distance left layer
+VisualizeMap(map_data)

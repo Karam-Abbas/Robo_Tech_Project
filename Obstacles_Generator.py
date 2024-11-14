@@ -52,16 +52,13 @@ def Generate_Map():
             with open('map.csv', 'w', newline='') as file:
                 writer = csv.writer(file)
                 writer.writerows(map_data)
+    return map_data
 
 # Load and visualize the map
-def VisualizeMap():
+def VisualizeMap(map_data):
     map_array = np.array(map_data)
     plt.figure(figsize=(10, 10))
     plt.imshow(map_array, cmap='Greys', interpolation='nearest')
     plt.title("Map Visualization")
     plt.show()
 
-
-Generate_Map()
-
-VisualizeMap()
