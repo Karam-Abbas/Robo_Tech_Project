@@ -41,4 +41,29 @@ for x in range(grid_size):
 df = pd.DataFrame(data)
 df.to_csv('map_data.csv', index=False, header=False)
 
+# Add noise to the distances
+def add_noise_to_distances(data, noise_range=(-1, 1), valid_range=(0, 600)):
+    noisy_data = []
+    for row in data:
+        obstacle_status, dist_above, dist_below, dist_left, dist_right = row
+        # Generate noise for each distance measurement
+        noise = np.random.uniform(noise_range[0], noise_range[1], size=4)
+        # Add noise to distances and clip to valid range
+        noisy_distances = np.clip(
+            [dist_above + noise[0], dist_below + noise[1], dist_left + noise[2], dist_right + noise[3]],
+            valid_range[0],
+            valid_range[1]
+        )
+        noisy_data.append([obstacle_status] + noisy_distances.tolist())
+    return noisy_data
+
+# Apply noise to the dataset
+noisy_data = add_noise_to_distances(data)
+
+# Convert noisy data to a DataFrame and save as CSV
+df_noisy = pd.DataFrame(noisy_data)
+df_noisy.to_csv('map_data_noisy.csv', index=False, header=False)
+
+# Visualize noisy data (if needed, by processing the noisy distances back into a map visualization)
+VisualizeMap(noisy_data)
 VisualizeMap(map_data)
