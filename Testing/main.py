@@ -30,8 +30,7 @@ belief_handler = BeliefHandler(
 belief_handler.visualize_belief()
 
 motion_model = MotionModel(
-    belief_handler=belief_handler,
-    filter_type="histogram"  # Choose 'histogram' or 'particle'
+    belief_handler=belief_handler
 )
 
 # Perform some actions
