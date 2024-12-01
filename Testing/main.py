@@ -1,4 +1,5 @@
-from classes import MapHandler,RobotHandler,BeliefHandler,MotionModel
+from classes import MapHandler,RobotHandler,BeliefHandler,MotionModel,FilterHandler
+
 import matplotlib.pyplot as plt
 # # Example usage
 # map_handler = MapHandler()
@@ -28,14 +29,18 @@ belief_handler = BeliefHandler(
 )
 belief_handler.visualize_belief()
 
-motion_model = MotionModel(belief_handler=belief_handler)
+motion_model = MotionModel(
+    belief_handler=belief_handler,
+    filter_type="histogram"  # Choose 'histogram' or 'particle'
+)
 
 # Perform some actions
-motion_model.turn(45)  # Turn by 1 degree with noise
-motion_model.move(100)  # Move by 1 cm with noise
+motion_model.turn(45)  # Turn by (_) degree with noise
+motion_model.move(100)  # Move by (_) cm with noise
 
 # Get the updated belief map
 belief_map = motion_model.get_current_belief()
 
 # Visualize the belief map
 belief_handler.visualize_belief()
+

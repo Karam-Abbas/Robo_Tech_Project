@@ -310,27 +310,39 @@ class BeliefHandler:
         """Load the belief map from a CSV file."""
         self.belief_map = np.loadtxt(filename, delimiter=",")
 
-
-
-import numpy as np
-
 class MotionModel:
-    def __init__(self, belief_handler, sigma_turn=0.5, sigma_move=0.5):
+    def __init__(self, belief_handler, filter_type="histogram", num_particles=100, sigma_turn=0.5, sigma_move=0.5):
         """
-        Initialize the Motion Model with the belief handler and noise parameters.
+        Initialize the Motion Model with the belief handler, filter type, and noise parameters.
         
         :param belief_handler: Instance of the BeliefHandler class containing the belief map.
+        :param filter_type: Type of filter to use ('histogram' or 'particle').
+        :param num_particles: Number of particles for the particle filter.
         :param sigma_turn: Standard deviation of the noise in the turn action.
         :param sigma_move: Standard deviation of the noise in the move action.
         """
         self.belief_handler = belief_handler
-        self.sigma_turn = sigma_turn  # Noise in turn
-        self.sigma_move = sigma_move  # Noise in movement
+        self.filter_type = filter_type
+        self.num_particles = num_particles
+        self.sigma_turn = sigma_turn
+        self.sigma_move = sigma_move
         self.direction = 0  # Initial direction (0 degrees)
+
+        if self.filter_type == "particle":
+            self._initialize_particles()
     
+    def _initialize_particles(self):
+        """Initialize particles randomly across the map."""
+        rows, cols = self.belief_handler.belief_map.shape
+        self.particles = np.array([
+            (np.random.randint(0, rows), np.random.randint(0, cols)) 
+            for _ in range(self.num_particles)
+        ])
+        self.particle_weights = np.ones(self.num_particles) / self.num_particles  # Equal initial weights
+
     def _add_noise_to_turn(self, delta_theta):
         """Add noise to the turn action."""
-        noise = np.random.normal(0, self.sigma_turn)  # Gaussian noise with mean 0 and std dev sigma_turn
+        noise = np.random.normal(0, self.sigma_turn)  # Gaussian noise
         return delta_theta + noise
     
     def _add_noise_to_move(self, delta_x, delta_y):
@@ -343,39 +355,184 @@ class MotionModel:
         """Turn the robot by delta_theta (with noise) in counterclockwise direction."""
         noisy_turn = self._add_noise_to_turn(delta_theta)
         self.direction = (self.direction - noisy_turn) % 360  # Ensure direction stays within 0-360 degrees
-        
-        # Update belief: rotate belief map by noisy_turn angle
-        self._propagate_belief()
-
+    
     def move(self, delta_distance):
         """Move the robot by delta_distance (with noise) in its current direction."""
-        # Calculate the intended movement in x and y based on the current direction
         delta_x = delta_distance * np.cos(np.radians(self.direction))
         delta_y = delta_distance * np.sin(np.radians(self.direction))
-        
-        # Add noise to the movement
         noisy_delta_x, noisy_delta_y = self._add_noise_to_move(delta_x, delta_y)
-        
-        # Update belief: propagate belief with noisy movement
-        self._propagate_belief(noisy_delta_x, noisy_delta_y)
+
+        if self.filter_type == "histogram":
+            self._propagate_belief_histogram(noisy_delta_x, noisy_delta_y)
+        elif self.filter_type == "particle":
+            self._propagate_belief_particle(noisy_delta_x, noisy_delta_y)
     
-    def _propagate_belief(self, noisy_delta_x=0, noisy_delta_y=0):
-        """Propagate belief based on the new position and orientation."""
-        # Apply noisy movement to the belief map by shifting the belief map
-        # This can be achieved by adjusting the belief probabilities according to the noisy move
-        # For simplicity, we can use a basic approach, such as shifting the belief map and normalizing
-        
-        # Note: In a real-world scenario, you would implement more sophisticated filtering techniques
-        # such as using a **Bayesian filter** (e.g., Kalman filter, particle filter) to propagate the belief
-        # based on the noisy actions.
-        
-        # Update belief map here (for simplicity, we just add a small offset)
-        self.belief_handler.belief_map = np.roll(self.belief_handler.belief_map, int(noisy_delta_x), axis=1)
-        self.belief_handler.belief_map = np.roll(self.belief_handler.belief_map, int(noisy_delta_y), axis=0)
-        
-        # Normalize the belief map to keep the probabilities valid
-        self.belief_handler.belief_map /= np.sum(self.belief_handler.belief_map)
+    def _propagate_belief_histogram(self, noisy_delta_x, noisy_delta_y):
+        """Propagate belief map using histogram filtering."""
+        belief_map = self.belief_handler.belief_map
+        rows, cols = belief_map.shape
+        updated_belief = np.zeros_like(belief_map)
+
+        for x in range(rows):
+            for y in range(cols):
+                new_x = int(x + noisy_delta_y)
+                new_y = int(y + noisy_delta_x)
+
+                if 0 <= new_x < rows and 0 <= new_y < cols:
+                    updated_belief[new_x, new_y] += belief_map[x, y]
+
+        updated_belief /= np.sum(updated_belief)  # Normalize
+        self.belief_handler.belief_map = updated_belief
     
+    def _propagate_belief_particle(self, noisy_delta_x, noisy_delta_y):
+        """Propagate belief using particle filtering."""
+        rows, cols = self.belief_handler.belief_map.shape
+        new_particles = []
+
+        for particle in self.particles:
+            x, y = particle
+            new_x = int(x + noisy_delta_y)
+            new_y = int(y + noisy_delta_x)
+
+            # Ensure particles stay within map bounds
+            new_x = max(0, min(rows - 1, new_x))
+            new_y = max(0, min(cols - 1, new_y))
+
+            new_particles.append((new_x, new_y))
+
+        self.particles = np.array(new_particles)
+        self._update_particle_weights()
+
+    def _update_particle_weights(self):
+        """Update weights of particles based on the belief map."""
+        rows, cols = self.belief_handler.belief_map.shape
+        new_weights = []
+
+        for particle in self.particles:
+            x, y = particle
+            new_weights.append(self.belief_handler.belief_map[x, y])
+
+        new_weights = np.array(new_weights)
+        new_weights /= np.sum(new_weights)  # Normalize weights
+        self.particle_weights = new_weights
+
+        # Resample particles based on weights
+        self.particles = self._resample_particles()
+
+    def _resample_particles(self):
+        """Resample particles based on their weights."""
+        indices = np.random.choice(
+            len(self.particles), 
+            size=self.num_particles, 
+            p=self.particle_weights
+        )
+        return self.particles[indices]
+
+    def visualize_particles(self):
+        """Visualize the particles on the map."""
+        rows, cols = self.belief_handler.belief_map.shape
+        particle_map = np.zeros((rows, cols))
+
+        for particle in self.particles:
+            x, y = particle
+            particle_map[x, y] += 1
+
+        plt.figure(figsize=(10, 10))
+        plt.imshow(particle_map, cmap='hot', interpolation='nearest')
+        plt.title("Particle Distribution")
+        plt.colorbar(label="Particle Count")
+        plt.show()
+
     def get_current_belief(self):
         """Return the current belief map."""
-        return self.belief_handler.belief_map
+        if self.filter_type == "histogram":
+            return self.belief_handler.belief_map
+        elif self.filter_type == "particle":
+            return self.particles, self.particle_weights
+
+
+class FilterHandler:
+    def __init__(self, map_handler, initial_belief, filter_type="histogram", num_particles=None):
+        """
+        Initialize the filter handler to manage histogram and particle filters.
+
+        :param map_handler: Instance of the MapHandler class containing the map data.
+        :param initial_belief: Initial belief for the robot (2D array or list of particles).
+        :param filter_type: Type of filter to use ('histogram' or 'particle').
+        :param num_particles: Number of particles for the particle filter (only used if filter_type='particle').
+        """
+        self.map_handler = map_handler
+        self.filter_type = filter_type
+        
+        if filter_type == "particle":
+            if num_particles is None:
+                raise ValueError("For Particle Filter, 'num_particles' must be specified.")
+            self.num_particles = num_particles
+            self.particles = self._initialize_particles()
+            self.histogram_belief = None
+        elif filter_type == "histogram":
+            self.histogram_belief = initial_belief
+            self.particles = None
+        else:
+            raise ValueError("Invalid filter type. Use 'histogram' or 'particle'.")
+
+
+    def _initialize_particles(self):
+        """Initialize particles randomly based on the map size."""
+        particles = []
+        for _ in range(self.num_particles):
+            x = random.randint(0, self.map_handler.rows - 1)
+            y = random.randint(0, self.map_handler.cols - 1)
+            particles.append((x, y))
+        return particles
+
+    def switch_filter(self, filter_type):
+        """
+        Switch between histogram and particle filter.
+
+        :param filter_type: The desired filter type ('histogram' or 'particle').
+        """
+        if filter_type not in ["histogram", "particle"]:
+            raise ValueError("Invalid filter type. Use 'histogram' or 'particle'.")
+        self.filter_type = filter_type
+
+        if filter_type == "histogram":
+            # Convert particles to histogram belief
+            self.histogram_belief = np.zeros((self.map_handler.rows, self.map_handler.cols))
+            for x, y in self.particles:
+                self.histogram_belief[x, y] += 1
+            self.histogram_belief /= np.sum(self.histogram_belief)  # Normalize
+            self.particles = None  # Disable particle representation
+        elif filter_type == "particle":
+            # Convert histogram belief to particles
+            self.particles = []
+            for x in range(self.map_handler.rows):
+                for y in range(self.map_handler.cols):
+                    count = int(self.histogram_belief[x, y] * self.num_particles)
+                    self.particles.extend([(x, y)] * count)
+            random.shuffle(self.particles)  # Randomize particle order
+            self.histogram_belief = None  # Disable histogram representation
+
+    def update(self, motion_model):
+        """
+        Update the belief based on the motion model.
+
+        :param motion_model: Instance of the motion model to propagate belief.
+        """
+        if self.filter_type == "histogram":
+            # Update belief using histogram propagation
+            self.histogram_belief = motion_model.update_histogram(self.histogram_belief)
+        elif self.filter_type == "particle":
+            # Update particles based on motion model
+            self.particles = motion_model.update_particles(self.particles)
+
+    def get_belief(self):
+        """
+        Retrieve the current belief state.
+
+        :return: Current belief (2D array for histogram or list of particles).
+        """
+        if self.filter_type == "histogram":
+            return self.histogram_belief
+        elif self.filter_type == "particle":
+            return self.particles
