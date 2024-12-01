@@ -342,7 +342,7 @@ class MotionModel:
     def turn(self, delta_theta):
         """Turn the robot by delta_theta (with noise) in counterclockwise direction."""
         noisy_turn = self._add_noise_to_turn(delta_theta)
-        self.direction = (self.direction + noisy_turn) % 360  # Ensure direction stays within 0-360 degrees
+        self.direction = (self.direction - noisy_turn) % 360  # Ensure direction stays within 0-360 degrees
         
         # Update belief: rotate belief map by noisy_turn angle
         self._propagate_belief()

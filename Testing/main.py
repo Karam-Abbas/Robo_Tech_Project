@@ -31,7 +31,7 @@ belief_handler.visualize_belief()
 motion_model = MotionModel(belief_handler=belief_handler)
 
 # Perform some actions
-motion_model.turn(0)  # Turn by 1 degree with noise
+motion_model.turn(45)  # Turn by 1 degree with noise
 motion_model.move(100)  # Move by 1 cm with noise
 
 # Get the updated belief map
