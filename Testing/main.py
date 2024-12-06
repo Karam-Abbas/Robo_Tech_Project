@@ -34,8 +34,10 @@ motion_model = MotionModel(
 )
 
 # Perform some actions
-motion_model.turn(45)  # Turn by (_) degree with noise
-motion_model.move(100)  # Move by (_) cm with noise
+motion_model.turn(90)  # Turn by (_) degree with noise
+for i in range(0,20,5):
+    motion_model.move(i)  # Move by (_) cm with noise
+
 
 # Get the updated belief map
 belief_map = motion_model.get_current_belief()

@@ -276,6 +276,25 @@ class BeliefHandler:
         # Normalize the belief map so that the sum is 1 (i.e., a valid probability distribution)
         self.belief_map /= np.sum(self.belief_map)
 
+    # def _initialize_gaussian_belief(self):
+    #     """Initialize belief map using 2D Gaussian distribution."""
+    #     mu_x, mu_y = self.mu
+    #     sigma_x, sigma_y = self.sigma
+
+    #     # Generate a grid of coordinates
+    #     x = np.arange(self.map_handler.rows)
+    #     y = np.arange(self.map_handler.cols)
+    #     X, Y = np.meshgrid(x, y)  # Corrected: use x, y order
+
+    #     # Calculate 2D Gaussian distribution
+    #     # Full 2D Gaussian formula with proper coordinate handling
+    #     z = ((X - mu_x)**2 / (2 * sigma_x**2) + 
+    #          (Y - mu_y)**2 / (2 * sigma_y**2))
+    #     self.belief_map = np.exp(-z)
+
+    #     # Normalize the belief map so that the sum is 1
+    #     self.belief_map /= np.sum(self.belief_map)
+
     def _initialize_uniform_belief(self):
         """Initialize belief map using a uniform distribution."""
         # Assign equal probability to all cells

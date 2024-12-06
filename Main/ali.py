@@ -4,7 +4,7 @@ from scipy.stats import multivariate_normal
 import math
 
 class Environment:
-    def _init_(self, map_file):
+    def __init__(self, map_file):
         self.map_data = np.genfromtxt(map_file, delimiter=',', skip_header=1)
         self.rows = int(np.max(self.map_data[:, 0]) + 1)
         self.cols = int(np.max(self.map_data[:, 1]) + 1)
@@ -74,7 +74,7 @@ class SensorModel:
         return readings
 
 class MotionModel:
-    def _init_(self, turn_noise_std=2.0, move_noise_std=0.2):
+    def __init__(self, turn_noise_std=2.0, move_noise_std=0.2):
         self.turn_noise_std = turn_noise_std
         self.move_noise_std = move_noise_std
     
@@ -285,3 +285,64 @@ class ParticleFilter:
         
         self.particles = new_particles
         self.weights = np.ones(self.num_particles) / self.num_particles
+        
+        
+
+
+
+def main():
+    # Load environment from a sample map file
+    map_file = 'map.csv'  # Replace with the path to your map file
+    env = Environment(map_file)
+    
+    # Set up the motion and sensor models
+    motion_model = MotionModel()
+    sensor_model = SensorModel()
+    
+    # Initialize the histogram and particle filters
+    histogram_filter = HistogramFilter()
+    particle_filter = ParticleFilter()
+    
+    # Define the initial position and orientation
+    x, y, orientation = 0, 0, 0  # Starting at (0, 0) facing right (0°)
+    
+    # Simulation parameters
+    steps = 10
+    motions = [(1, 0), (0, 1), (-1, 0), (0, -1)]  # Right, Up, Left, Down
+    
+    for step in range(steps):
+        print(f"\nStep {step + 1}")
+        
+        # Choose a motion command
+        dx, dy = motions[step % len(motions)]  # Cycle through motions
+        
+        # Simulate motion
+        new_x, new_y, new_orientation = motion_model.execute_motion(x, y, orientation, 0, math.sqrt(dx**2 + dy**2))
+        
+        # Validate and update position
+        if env.is_valid_position(new_x, new_y):
+            x, y, orientation = new_x, new_y, new_orientation
+        print(f"New position: ({x:.2f}, {y:.2f}), Orientation: {orientation:.2f}°")
+        
+        # Simulate sensor readings
+        sensor_readings = sensor_model.get_reading(env, x, y)
+        print(f"Sensor readings: {sensor_readings}")
+        
+        # Update histogram filter
+        histogram_filter.update_motion(dx, dy)
+        histogram_filter.update_sensor(sensor_readings, x, y)
+        print("Updated histogram belief:")
+        print(histogram_filter.belief)
+        
+        # Update particle filter
+        particle_filter.motion_update(dx, dy)
+        particle_filter.sensor_update(sensor_readings)
+        particle_filter.resample()
+        print("Particle filter resampled particles:")
+        for particle in particle_filter.particles[:5]:  # Show a sample of particles
+            print(particle)
+    
+    print("\nSimulation complete.")
+
+if __name__ == "__main__":
+    main()
