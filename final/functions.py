@@ -28,10 +28,11 @@ class HistogramFilter:
         new_prob = gaussian_filter(new_prob, sigma=self.sigma_move)  # Apply Gaussian blur to simulate spread
         self.prob = new_prob / new_prob.sum()  # Normalize
 
-    def sensor_update(self, sensed_x, sensed_y):
-        update_prob = gaussian_2d_probability(self.X, self.Y, mu_x=sensed_x, mu_y=sensed_y, sigma_x=self.initial_sigma_x, sigma_y=self.initial_sigma_y)
-        self.prob *= update_prob
-        self.prob /= self.prob.sum()  # Normalize
+    def sensor_update(self, sensed_x, sensed_y): 
+        distances = np.sqrt((self.particles[:, 0] - sensed_x) ** 2 + (self.particles[:, 1] - sensed_y) ** 2)
+        self.weights *= np.exp(-distances ** 2 / (2 * self.sigma_sensor ** 2))
+        self.weights += 1.e-300 # avoid round-off to zero
+        self.weights /= self.weights.sum() # Normalize
 
     def set_no_go_areas(self, no_go_grid):
         self.grid = no_go_grid
@@ -90,7 +91,7 @@ def gaussian_2d_probability(x, y, mu_x, mu_y, sigma_x, sigma_y):
     return norm_factor * np.exp(exponent)
 
 class LocalizationVisualizer:
-    def __init__(self, grid_size=100, num_particles=200, filter_type='histogram', distribution_type='gaussian'):
+    def __init__(self, grid_size=100, num_particles=1000, filter_type='histogram', distribution_type='gaussian'):
         self.grid_size = grid_size
         self.num_particles = num_particles
         self.filter_type = filter_type
@@ -146,3 +147,4 @@ class LocalizationVisualizer:
         ani = FuncAnimation(fig, self.update, frames=(len(self.movements) * self.steps_per_movement) + 1, repeat=False, interval=1000)
         plt.tight_layout()
         plt.show()
+
