@@ -1,8 +1,11 @@
-import csv
-import matplotlib.pyplot as plt
 import numpy as np
-import random
 import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
+from matplotlib.animation import FuncAnimation
+from scipy.ndimage import gaussian_filter
+import csv
+import random
 from tqdm import tqdm
 import re
 
@@ -278,25 +281,6 @@ class BeliefHandler:
         # Normalize the belief map so that the sum is 1 (i.e., a valid probability distribution)
         self.belief_map /= np.sum(self.belief_map)
 
-    # def _initialize_gaussian_belief(self):
-    #     """Initialize belief map using 2D Gaussian distribution."""
-    #     mu_x, mu_y = self.mu
-    #     sigma_x, sigma_y = self.sigma
-
-    #     # Generate a grid of coordinates
-    #     x = np.arange(self.map_handler.rows)
-    #     y = np.arange(self.map_handler.cols)
-    #     X, Y = np.meshgrid(x, y)  # Corrected: use x, y order
-
-    #     # Calculate 2D Gaussian distribution
-    #     # Full 2D Gaussian formula with proper coordinate handling
-    #     z = ((X - mu_x)**2 / (2 * sigma_x**2) + 
-    #          (Y - mu_y)**2 / (2 * sigma_y**2))
-    #     self.belief_map = np.exp(-z)
-
-    #     # Normalize the belief map so that the sum is 1
-    #     self.belief_map /= np.sum(self.belief_map)
-
     def _initialize_uniform_belief(self):
         """Initialize belief map using a uniform distribution."""
         # Assign equal probability to all cells
@@ -333,162 +317,251 @@ class BeliefHandler:
         self.belief_map = np.loadtxt(filename, delimiter=",")
 
 
-# class MotionModel:
-#     def __init__(self, belief_handler, sigma_turn=0.5, sigma_move=0.5):
-#         """
-#         Initialize the Motion Model with the belief handler and noise parameters.
+class MotionModelHistogram:
+    def __init__(self, map_handler, robot_handler, belief_handler):
+        self.map_handler = map_handler
+        self.robot_handler = robot_handler
+        self.belief_handler = belief_handler
+        self.sigma_move = 1.0 
+        self.sigma_sensor= 0.5
+        self.grid_size = self.map_handler.rows
+        self.prob = self.belief_handler.belief_map
+        self.actual_data = pd.read_csv('map_data.csv', header=None).values
+        self.noisy_data = pd.read_csv('map_data_noisy.csv', header=None).values
         
-#         :param belief_handler: Instance of the BeliefHandler class containing the belief map.
-#         :param sigma_turn: Standard deviation of the noise in the turn action.
-#         :param sigma_move: Standard deviation of the noise in the move action.
-#         """
-#         self.belief_handler = belief_handler
-#         self.sigma_turn = sigma_turn  # Noise in turn
-#         self.sigma_move = sigma_move  # Noise in movement
-#         self.direction = 0  # Initial direction (0 degrees)
-    
-#     def _add_noise_to_turn(self, delta_theta):
-#         """Add noise to the turn action."""
-#         noise = np.random.normal(0, self.sigma_turn)  # Gaussian noise with mean 0 and std dev sigma_turn
-#         return delta_theta + noise
-    
-#     def _add_noise_to_move(self, delta_x, delta_y):
-#         """Add noise to the move action."""
-#         noise_x = np.random.normal(0, self.sigma_move)
-#         noise_y = np.random.normal(0, self.sigma_move)
-#         return delta_x + noise_x, delta_y + noise_y
-    
-#     def turn(self, delta_theta):
-#         """Turn the robot by delta_theta (with noise) in counterclockwise direction."""
-#         noisy_turn = self._add_noise_to_turn(delta_theta)
-#         self.direction = (self.direction - noisy_turn) % 360  # Ensure direction stays within 0-360 degrees
-
-#     def move(self, delta_distance):
-#         """Move the robot by delta_distance (with noise) in its current direction."""
-#         # Calculate the intended movement in x and y based on the current direction
-#         delta_x = delta_distance * np.cos(np.radians(self.direction))
-#         delta_y = delta_distance * np.sin(np.radians(self.direction))
+    def hist_move_probability(self, move_x, move_y):
+        new_prob = np.roll(self.prob, move_y, axis=0)  # Move in Y direction
+        new_prob = np.roll(new_prob, move_x, axis=1)  # Move in X direction
+        new_prob = gaussian_filter(new_prob, sigma=self.sigma_move)  # Apply Gaussian blur to simulate spread
+        self.prob = new_prob / new_prob.sum()  # Normalize
         
-#         # Add noise to the movement
-#         noisy_delta_x, noisy_delta_y = self._add_noise_to_move(delta_x, delta_y)
+    def hist_sensor_update_single_point(self, i, j):
+        """
+        Updates the belief grid for a single grid cell based on sensor data read from files.
+
+        Parameters:
+            i, j (int): Indices of the grid cell to update.
+        """
+       
+        row_index = i * self.grid_size + j
+        obstacle_status = self.actual_data[row_index, 0]
+        expected_data = self.actual_data[row_index, 1:]
+        observed_data = self.noisy_data[row_index, 1:] # [dist_up, dist_down, dist_left, dist_right]
+
+        # Handle obstacle cells
+        if obstacle_status == 1:  # Assuming `1` represents an obstacle
+            self.prob[i, j] = 1e-300  # Very small probability for obstacle cells
+            return
+
+        # Compute likelihoods using Gaussian model
+        likelihood_up = np.exp(-((observed_data[0] - expected_data[0]) ** 2) / (2 * self.sigma_sensor**2))
+        likelihood_down = np.exp(-((observed_data[1] - expected_data[1]) ** 2) / (2 * self.sigma_sensor**2))
+        likelihood_left = np.exp(-((observed_data[2] - expected_data[2]) ** 2) / (2 * self.sigma_sensor**2))
+        likelihood_right = np.exp(-((observed_data[3] - expected_data[3]) ** 2) / (2 * self.sigma_sensor**2))
+
+        # Combine likelihoods for this cell
+        sensor_prob = likelihood_up * likelihood_down * likelihood_left * likelihood_right
+
+        # Update belief for this cell
+        self.prob[i, j] *= sensor_prob
+        self.prob[i, j] += 1e-300  # Avoid zeros
+
+        # Normalize the belief grid
+        self.prob /= self.prob.sum()
+
+    def hist_plot_probability_distribution(self, ax, title):
+        ax.clear()
+        sns.heatmap(self.prob, cmap='hot', cbar=False, ax=ax)
+        ax.set_ylim(self.grid_size, 0)  # Invert the y-axis by setting the limits in reverse order
+        ax.set_title(title)
+
+
+class LocalizationVisualizerHistogram:
+    def __init__(self, motion_model):
+        self.motion_model = motion_model
+        self.grid_size = self.motion_model.grid_size
+        self.movements = [(-2,0),(-2,0),(-2,0),(-2,0),(-2,0),(-2,0),(-2,0),(-2,0),(-2,0),(-2,0),(-2,0),(-2,0),(-2,0),(-2,0),(-2,0),(-2,0),(-2,0),(-2,0),(-2,0),(-2,0),(-2,0),(-2,0),(-2,0),(-2,0),(-2,0),(-2,0),(-2,0),(-2,0),(-2,0),(-2,0),(-2,0),(-2,0),(-2,0),(-2,0),(-2,0),(-2,0),(-2,0)]
+        self.steps_per_movement = 1
+        self.robot_x, self.robot_y = self.motion_model.robot_handler.robot_position
+
+    def update(self, frame):       
+        self.axes.cla()
+        step = (frame - 1) // self.steps_per_movement
+        sub_step = (frame - 1) % self.steps_per_movement
+        if step < len(self.movements):
+            move_x, move_y = self.movements[step]
+            move_x = int(move_x / self.steps_per_movement)
+            move_y = int(move_y / self.steps_per_movement)
+            # Update the robot's position
+            self.robot_x += move_x
+            self.robot_y += move_y
+            self.motion_model.hist_move_probability(move_x, move_y)
+            self.motion_model.hist_sensor_update_single_point(self.robot_x, self.robot_y)
+            self.motion_model.hist_plot_probability_distribution(self.axes, f'Histogram Filter: Step {frame}')
+        self.axes.set_xlim(0, self.grid_size - 1)
+        self.axes.set_ylim(self.grid_size - 1,0)
+        self.axes.invert_yaxis()
+        plt.draw()
+
+    def plot_initial_distribution(self):
+        self.motion_model.hist_plot_probability_distribution(self.axes, 'Histogram Filter: Initial Probability Distribution')
+        self.axes.invert_yaxis()  # Ensure y-axis is inverted for initial plot
+
+    def visualize(self):
+        fig, self.axes = plt.subplots(1, 1, figsize=(10, 10))
+        ani = FuncAnimation(fig, self.update, frames=(len(self.movements) * self.steps_per_movement) + 1, repeat=False, interval=1)
+        plt.tight_layout()
+        plt.show()
+
+import numpy as np
+import pandas as pd
+import seaborn as sns
+import matplotlib.pyplot as plt
+from scipy.ndimage import gaussian_filter
+from matplotlib.animation import FuncAnimation
+
+class MotionModelParticleFilter:
+    def __init__(self, map_handler, robot_handler, belief_handler, num_particles=100):
+        self.map_handler = map_handler
+        self.robot_handler = robot_handler
+        self.belief_handler = belief_handler
+        self.sigma_move = 1.0 
+        self.sigma_sensor = 0.5
+        self.num_particles = num_particles
+        self.particles = np.array([self.robot_handler.robot_position] * num_particles)  # Initialize particles
+        self.weights = np.ones(num_particles) / num_particles  # Initialize weights
+        self.actual_data = pd.read_csv('map_data.csv', header=None).values
+        self.noisy_data = pd.read_csv('map_data_noisy.csv', header=None).values
         
-#         # Update belief using histogram filtering
-#         self._propagate_belief(noisy_delta_x, noisy_delta_y)
-    
-#     def _propagate_belief(self, noisy_delta_x, noisy_delta_y):
-#         """
-#         Propagate the belief map using histogram filtering based on noisy movements.
+    def particle_move(self, move_x, move_y):
+        # Apply movement with added noise
+        noise_x = np.random.normal(0, self.sigma_move, self.num_particles)
+        noise_y = np.random.normal(0, self.sigma_move, self.num_particles)
+        self.particles[:, 0] += move_x + noise_x
+        self.particles[:, 1] += move_y + noise_y
+        # Ensure particles stay within map bounds
+        self.particles[:, 0] = np.clip(self.particles[:, 0], 0, self.map_handler.rows - 1)
+        self.particles[:, 1] = np.clip(self.particles[:, 1], 0, self.map_handler.cols - 1)
         
-#         :param noisy_delta_x: Noisy movement in the x direction.
-#         :param noisy_delta_y: Noisy movement in the y direction.
-#         """
-#         belief_map = self.belief_handler.belief_map
-#         rows, cols = belief_map.shape
-#         updated_belief = np.zeros_like(belief_map)
+    def particle_sensor_update(self):
+        for i in range(self.num_particles):
+            x, y = int(self.particles[i, 0]), int(self.particles[i, 1])
+            row_index = x * self.map_handler.rows + y
+            obstacle_status = self.actual_data[row_index, 0]
+            expected_data = self.actual_data[row_index, 1:]
+            observed_data = self.noisy_data[row_index, 1:]
 
-#         # Iterate over each cell in the belief map
-#         for x in range(rows):
-#             for y in range(cols):
-#                 # Calculate the new position after applying motion
-#                 new_x = int(x + noisy_delta_y)  # Apply movement in y-direction
-#                 new_y = int(y + noisy_delta_x)  # Apply movement in x-direction
+            # Handle obstacle cells
+            if obstacle_status == 1:
+                self.weights[i] = 1e-300
+                continue
 
-#                 # Check if the new position is within bounds
-#                 if 0 <= new_x < rows and 0 <= new_y < cols:
-#                     updated_belief[new_x, new_y] += belief_map[x, y]
+            likelihoods = np.exp(-((observed_data - expected_data) ** 2) / (2 * self.sigma_sensor**2))
+            sensor_prob = np.prod(likelihoods)
+            self.weights[i] *= sensor_prob
 
-#         # Normalize the updated belief map to ensure it represents valid probabilities
-#         updated_belief /= np.sum(updated_belief)
-#         self.belief_handler.belief_map = updated_belief
-    
-#     def get_current_belief(self):
-#         """Return the current belief map."""
-#         return self.belief_handler.belief_map
-
-
-# class FilterHandler:
-#     def __init__(self, map_handler, initial_belief, filter_type="histogram", num_particles=None):
-#         """
-#         Initialize the filter handler to manage histogram and particle filters.
-
-#         :param map_handler: Instance of the MapHandler class containing the map data.
-#         :param initial_belief: Initial belief for the robot (2D array or list of particles).
-#         :param filter_type: Type of filter to use ('histogram' or 'particle').
-#         :param num_particles: Number of particles for the particle filter (only used if filter_type='particle').
-#         """
-#         self.map_handler = map_handler
-#         self.filter_type = filter_type
+        # Normalize weights
+        self.weights += 1e-300  # Avoid zeros
+        self.weights /= self.weights.sum()
         
-#         if filter_type == "particle":
-#             if num_particles is None:
-#                 raise ValueError("For Particle Filter, 'num_particles' must be specified.")
-#             self.num_particles = num_particles
-#             self.particles = self._initialize_particles()
-#             self.histogram_belief = None
-#         elif filter_type == "histogram":
-#             self.histogram_belief = initial_belief
-#             self.particles = None
-#         else:
-#             raise ValueError("Invalid filter type. Use 'histogram' or 'particle'.")
+    def resample_particles(self):
+        indices = np.random.choice(range(self.num_particles), size=self.num_particles, p=self.weights)
+        self.particles = self.particles[indices]
+        self.weights = np.ones(self.num_particles) / self.num_particles
+        
+    def estimate_position(self):
+        return np.average(self.particles, axis=0, weights=self.weights)
+
+    def plot_particles(self, ax, title):
+        ax.clear()
+        sns.scatterplot(x=self.particles[:, 1], y=self.particles[:, 0], s=5, color='blue', ax=ax)
+        estimate = self.estimate_position()
+        ax.scatter(estimate[1], estimate[0], color='red', s=100)  # Plot the estimated position
+        ax.set_xlim(0, self.map_handler.cols - 1)
+        ax.set_ylim(self.map_handler.rows - 1, 0)  # Invert the y-axis by setting the limits in reverse order
+        ax.set_title(title)
 
 
-#     def _initialize_particles(self):
-#         """Initialize particles randomly based on the map size."""
-#         particles = []
-#         for _ in range(self.num_particles):
-#             x = random.randint(0, self.map_handler.rows - 1)
-#             y = random.randint(0, self.map_handler.cols - 1)
-#             particles.append((x, y))
-#         return particles
+class LocalizationVisualizerParticleFilter:
+    def __init__(self, motion_model):
+        self.motion_model = motion_model
+        self.movements = [(-2, 0)] * 37  # Simplified for brevity
+        self.steps_per_movement = 1
+        self.robot_x, self.robot_y = self.motion_model.robot_handler.robot_position
+        self.fig, self.axes = plt.subplots(1, 1, figsize=(10, 10))  # Initialize figure and axes here
 
-#     def switch_filter(self, filter_type):
-#         """
-#         Switch between histogram and particle filter.
+    def update(self, frame):       
+        self.axes.cla()
+        step = (frame - 1) // self.steps_per_movement
+        sub_step = (frame - 1) % self.steps_per_movement
+        if step < len(self.movements):
+            move_x, move_y = self.movements[step]
+            move_x = int(move_x / self.steps_per_movement)
+            move_y = int(move_y / self.steps_per_movement)
+            # Update the robot's position
+            self.robot_x += move_x
+            self.robot_y += move_y
+            self.motion_model.particle_move(move_x, move_y)
+            self.motion_model.particle_sensor_update()
+            self.motion_model.resample_particles()
+            self.motion_model.plot_particles(self.axes, f'Particle Filter: Step {frame}')
+        self.axes.set_xlim(0, self.motion_model.map_handler.cols - 1)
+        self.axes.set_ylim(self.motion_model.map_handler.rows - 1, 0)  # Inverted y-axis for correct display
+        plt.draw()
 
-#         :param filter_type: The desired filter type ('histogram' or 'particle').
-#         """
-#         if filter_type not in ["histogram", "particle"]:
-#             raise ValueError("Invalid filter type. Use 'histogram' or 'particle'.")
-#         self.filter_type = filter_type
+    def plot_initial_distribution(self):
+        self.motion_model.plot_particles(self.axes, 'Particle Filter: Initial Particle Distribution')
+        plt.draw()
 
-#         if filter_type == "histogram":
-#             # Convert particles to histogram belief
-#             self.histogram_belief = np.zeros((self.map_handler.rows, self.map_handler.cols))
-#             for x, y in self.particles:
-#                 self.histogram_belief[x, y] += 1
-#             self.histogram_belief /= np.sum(self.histogram_belief)  # Normalize
-#             self.particles = None  # Disable particle representation
-#         elif filter_type == "particle":
-#             # Convert histogram belief to particles
-#             self.particles = []
-#             for x in range(self.map_handler.rows):
-#                 for y in range(self.map_handler.cols):
-#                     count = int(self.histogram_belief[x, y] * self.num_particles)
-#                     self.particles.extend([(x, y)] * count)
-#             random.shuffle(self.particles)  # Randomize particle order
-#             self.histogram_belief = None  # Disable histogram representation
+    def visualize(self):
+        ani = FuncAnimation(self.fig, self.update, frames=(len(self.movements) * self.steps_per_movement) + 1, repeat=False, interval=1)
+        plt.tight_layout()
+        plt.show()
 
-#     def update(self, motion_model):
-#         """
-#         Update the belief based on the motion model.
 
-#         :param motion_model: Instance of the motion model to propagate belief.
-#         """
-#         if self.filter_type == "histogram":
-#             # Update belief using histogram propagation
-#             self.histogram_belief = motion_model.update_histogram(self.histogram_belief)
-#         elif self.filter_type == "particle":
-#             # Update particles based on motion model
-#             self.particles = motion_model.update_particles(self.particles)
 
-#     def get_belief(self):
-#         """
-#         Retrieve the current belief state.
+# # Example usage
+map_handler = MapHandler()
+# map_handler.generate_map()
+# map_handler.calculate_distances()
+# map_handler.add_noise_to_distances()
+# map_handler.save_map_to_csv("map.csv")
+map_handler.initialize_from_csv("map.csv")
+# map_handler.visualize_map()
 
-#         :return: Current belief (2D array for histogram or list of particles).
-#         """
-#         if self.filter_type == "histogram":
-#             return self.histogram_belief
-#         elif self.filter_type == "particle":
-#             return self.particles
+robot_handler = RobotHandler(map_handler)
+robot_handler.load_robot_data()
+# robot_handler.set_initial_position()
+# robot_handler.set_goal_cells(num_goals=5)
+# robot_handler.save_robot_data("robot_data.txt")
+# robot_handler.visualize_robot_and_goals()
 
+
+# Assuming map_handler is already initialized and robot_handler has the robot position:
+robot_position = robot_handler.robot_position  # (mu_x, mu_y)
+
+belief_handler = BeliefHandler(
+    map_handler=map_handler,
+    belief_type='gaussian', 
+    mu=robot_position,  # Position of the robot in the grid, if no position then center of the grid will be set by default.
+    sigma=(30, 30)  # spread of the probability distribution in the grid, if no value then 1/6(grid size will be set.)
+)
+# belief_handler.visualize_belief()
+
+# # Create an instance of MotionModel
+# motion_model = MotionModelHistogram(map_handler, robot_handler, belief_handler)
+# # Create an instance of LocalizationVisualizer with the MotionModel
+# visualizer = LocalizationVisualizerHistogram(motion_model)
+
+# # Visualize the localization process
+# visualizer.visualize()
+
+
+# Create the motion model with particle filter 
+motion_model = MotionModelParticleFilter(map_handler, robot_handler, belief_handler) 
+# Create the visualizer 
+visualizer = LocalizationVisualizerParticleFilter(motion_model) 
+# Plot initial distribution 
+visualizer.plot_initial_distribution() 
+# Run the visualization 
+visualizer.visualize()

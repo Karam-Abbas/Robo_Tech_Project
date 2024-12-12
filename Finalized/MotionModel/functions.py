@@ -67,7 +67,7 @@ class HistogramFilter:
     def plot_probability_distribution(self, ax, title):
         ax.clear()
         sns.heatmap(self.prob, cmap='hot', cbar=False, ax=ax)
-        ax.set_ylim(0, self.grid_size)  # Set y-axis limits
+        ax.set_ylim(self.grid_size,0)  # Set y-axis limits
 
 class ParticleFilter:
     def __init__(self, num_particles, grid_size, sigma_move=1.0, sigma_sensor=0.5):
@@ -137,13 +137,71 @@ def gaussian_2d_probability(x, y, mu_x, mu_y, sigma_x, sigma_y):
     norm_factor = 1 / (2 * np.pi * sigma_x * sigma_y)
     return norm_factor * np.exp(exponent)
 
+# class LocalizationVisualizer:
+#     def __init__(self, grid_size=100, num_particles=1000, filter_type='histogram', distribution_type='gaussian'):
+#         self.grid_size = grid_size
+#         self.num_particles = num_particles
+#         self.filter_type = filter_type
+#         self.distribution_type = distribution_type
+#         self.center_x, self.center_y = (grid_size - 1) / 2, (grid_size - 1) / 2
+#         self.movements = [(15, 0), (0, 15), (-15, 0), (0, -15)]
+#         self.steps_per_movement = 1
+#         self.initialize_filter()
+
+#     def initialize_filter(self):
+#         if self.filter_type == 'histogram':
+#             self.filter = HistogramFilter(self.grid_size, sigma_move=1.5, sigma_sensor=5)
+#             self.filter.initialize_probability(self.center_x, self.center_y, sigma_x=5, sigma_y=5, distribution_type=self.distribution_type)
+#             no_go_grid = np.zeros((self.grid_size, self.grid_size))
+#             no_go_grid[20:40, 20:40] = 1
+#             self.filter.set_no_go_areas(no_go_grid)
+#         elif self.filter_type == 'particle':
+#             self.filter = ParticleFilter(self.num_particles, self.grid_size, sigma_move=1.0, sigma_sensor=5.0)
+#             self.filter.initialize_particles(distribution_type=self.distribution_type)
+
+#     def update(self, frame):
+#         if frame == 0:
+#             if self.filter_type == 'histogram':
+#                 self.filter.plot_probability_distribution(self.axes, 'Histogram Filter: Initial Probability Distribution')
+#             elif self.filter_type == 'particle':
+#                 self.filter.plot_particles(self.axes, 'Particle Filter: Initial Particle Distribution')
+#         else:
+#             self.axes.cla()
+#             step = (frame - 1) // self.steps_per_movement
+#             sub_step = (frame - 1) % self.steps_per_movement
+
+#             if step < len(self.movements):
+#                 move_x, move_y = self.movements[step]
+#                 move_x = int(move_x / self.steps_per_movement)
+#                 move_y = int(move_y / self.steps_per_movement)
+
+#                 if self.filter_type == 'histogram':
+#                     self.filter.move_probability(move_x, move_y)
+#                     self.filter.sensor_update(self.center_x + move_x * sub_step, self.center_y + move_y * sub_step)
+#                     self.filter.plot_probability_distribution(self.axes, f'Histogram Filter: Step {frame}')
+#                 elif self.filter_type == 'particle':
+#                     self.filter.move_particles(move_x, move_y)
+#                     self.filter.sensor_update(self.center_x + move_x * sub_step, self.center_y + move_y * sub_step)
+#                     self.filter.resample_particles()
+#                     self.filter.plot_particles(self.axes, f'Particle Filter: Step {frame}')
+            
+#             self.axes.set_xlim(0, self.grid_size - 1)
+#             self.axes.set_ylim(0, self.grid_size - 1)
+#             plt.draw()
+
+#     def visualize(self):
+#         fig, self.axes = plt.subplots(1, 1, figsize=(7, 7))
+#         ani = FuncAnimation(fig, self.update, frames=(len(self.movements) * self.steps_per_movement) + 1, repeat=False, interval=1000)
+#         plt.tight_layout()
+#         plt.show()
+
 class LocalizationVisualizer:
-    def __init__(self, grid_size=100, num_particles=1000, filter_type='histogram', distribution_type='gaussian'):
+    def __init__(self, grid_size=100, num_particles=1000, filter_type='histogram', distribution_type='gaussian', initial_position=(50, 50)):
         self.grid_size = grid_size
         self.num_particles = num_particles
         self.filter_type = filter_type
         self.distribution_type = distribution_type
-        self.center_x, self.center_y = (grid_size - 1) / 2, (grid_size - 1) / 2
+        self.robot_x, self.robot_y = initial_position
         self.movements = [(15, 0), (0, 15), (-15, 0), (0, -15)]
         self.steps_per_movement = 1
         self.initialize_filter()
@@ -151,7 +209,7 @@ class LocalizationVisualizer:
     def initialize_filter(self):
         if self.filter_type == 'histogram':
             self.filter = HistogramFilter(self.grid_size, sigma_move=1.5, sigma_sensor=5)
-            self.filter.initialize_probability(self.center_x, self.center_y, sigma_x=5, sigma_y=5, distribution_type=self.distribution_type)
+            self.filter.initialize_probability(self.robot_x, self.robot_y, sigma_x=5, sigma_y=5, distribution_type=self.distribution_type)
             no_go_grid = np.zeros((self.grid_size, self.grid_size))
             no_go_grid[20:40, 20:40] = 1
             self.filter.set_no_go_areas(no_go_grid)
@@ -165,6 +223,7 @@ class LocalizationVisualizer:
                 self.filter.plot_probability_distribution(self.axes, 'Histogram Filter: Initial Probability Distribution')
             elif self.filter_type == 'particle':
                 self.filter.plot_particles(self.axes, 'Particle Filter: Initial Particle Distribution')
+            self.axes.invert_yaxis()  # Add this line to invert the y-axis for the initial frame
         else:
             self.axes.cla()
             step = (frame - 1) // self.steps_per_movement
@@ -175,16 +234,20 @@ class LocalizationVisualizer:
                 move_x = int(move_x / self.steps_per_movement)
                 move_y = int(move_y / self.steps_per_movement)
 
+                # Update the robot's position
+                self.robot_x += move_x
+                self.robot_y += move_y
+
                 if self.filter_type == 'histogram':
                     self.filter.move_probability(move_x, move_y)
-                    self.filter.sensor_update(self.center_x + move_x * sub_step, self.center_y + move_y * sub_step)
+                    self.filter.sensor_update(self.robot_x, self.robot_y)
                     self.filter.plot_probability_distribution(self.axes, f'Histogram Filter: Step {frame}')
                 elif self.filter_type == 'particle':
                     self.filter.move_particles(move_x, move_y)
-                    self.filter.sensor_update(self.center_x + move_x * sub_step, self.center_y + move_y * sub_step)
+                    self.filter.sensor_update(self.robot_x, self.robot_y)
                     self.filter.resample_particles()
                     self.filter.plot_particles(self.axes, f'Particle Filter: Step {frame}')
-            
+
             self.axes.set_xlim(0, self.grid_size - 1)
             self.axes.set_ylim(0, self.grid_size - 1)
             plt.draw()
