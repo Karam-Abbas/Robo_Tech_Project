@@ -448,8 +448,8 @@ def main():
         print(f"\nStep {step + 1}:")
 
         # Simulate motion
-        delta_distance = 200
-        delta_turn = 30
+        delta_distance = 100
+        delta_turn = 45
         motion_model.turn(delta_turn)
         noisy_distance = motion_model.move(delta_distance)
 
