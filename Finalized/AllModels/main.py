@@ -28,17 +28,17 @@ belief_handler = BeliefHandler(
 )
 # belief_handler.visualize_belief()
 
-# # Create an instance of MotionModel
-# motion_model = MotionModelHistogram(map_handler, robot_handler, belief_handler)
-# # Create an instance of LocalizationVisualizer with the MotionModel
-# visualizer = LocalizationVisualizerHistogram(motion_model)
-# # Visualize the localization process
-# visualizer.visualize()
-
-
-# Create the motion model with particle filter 
-motion_model = MotionModelParticleFilter(map_handler, robot_handler,belief_handler) 
-# Create the visualizer 
-visualizer = LocalizationVisualizerParticleFilter(map_handler, robot_handler,belief_handler) 
-# Run the visualization 
+# Create an instance of MotionModel
+motion_model = MotionModelHistogram(map_handler, robot_handler, belief_handler)
+# Create an instance of LocalizationVisualizer with the MotionModel
+visualizer = LocalizationVisualizerHistogram(motion_model)
+# Visualize the localization process
 visualizer.visualize()
+
+
+# # Create the motion model with particle filter 
+# motion_model = MotionModelParticleFilter(map_handler, robot_handler,belief_handler) 
+# # Create the visualizer 
+# visualizer = LocalizationVisualizerParticleFilter(map_handler, robot_handler,belief_handler) 
+# # Run the visualization 
+# visualizer.visualize()
